@@ -1,0 +1,60 @@
+digraph EvaLaunch {
+  rankdir=TB; compound=true; fontname="Helvetica"; nodesep=0.35; ranksep=0.6;
+  node [shape=record, fontname="Helvetica", fontsize=10, style=filled, fillcolor="#ffffff"];
+  edge [fontname="Helvetica", fontsize=9];
+
+  Client [label="{ConsoleApp\n(Client)|+ run()}", fillcolor="#f4f4f4"];
+
+  subgraph cluster_f { label="Facades"; style=rounded; color="#555555";
+    Launch [label="{EvaLaunchFacade|REQUIRED_MEGAWATTS : double|+ scramble(LaunchRequest) : OrderView\l+ scramble(LaunchRequest, CrashPoint) : OrderView\l+ resumeInterrupted() : List\<OrderView\>\l- drive(LaunchOrder, CrashPoint)\l}", fillcolor="#fff2cc"];
+    Control [label="{HangarControlFacade||+ listOrders() : List\<OrderView\>\l+ inspect(long) : OrderView\l+ manualCompensate(long) : OrderView\l+ setBayPower(String, double)\l+ setShaftCondition(String, boolean, boolean)\l+ shaftReport(String) : String\l}", fillcolor="#fff2cc"];
+    Comp [label="{ChainCompensator|+ compensate(LaunchOrder, String)}", fillcolor="#fde9c0"];
+    Asm [label="{OrderViewAssembler|+ assemble(LaunchOrder) : OrderView}", fillcolor="#fde9c0"];
+    Order [label="{LaunchOrder|id, pilotName, chassisId, stress, shaftId\lstatus : ChainStatus\lpilotSessionId, powerLineId, catapultRunId\lfailureReason, trail\l|}", fillcolor="#fde9c0"];
+    OrderRepo [label="{LaunchOrderRepository|+ create / update / find\l+ findAll / findNonTerminal\l}", fillcolor="#fde9c0"];
+    View [label="{OrderView\<\<record\>\>|orderId, chain, pilot, power,\lcatapult, failureReason, trail\l}", fillcolor="#fde9c0"];
+    Chain [label="{\<\<enumeration\>\>\nChainStatus|STARTED\lPENDING_B\lPENDING_C\lCOMPLETED\lCOMPENSATING\lCOMPENSATED\lREJECTED\l}", fillcolor="#fde9c0"];
+  }
+
+  subgraph cluster_a { label="Subsystem A - Pilot Sync and Cage Lock"; style=rounded; color="#2e75b6";
+    EPL [label="{EntryPlugLauncher|+ insertPlug(String, String, double) : PilotSession\l+ unlatch(long) : PilotSession\l+ emergencyEject(long) : PilotSession\l+ find(long) / lockedOn(String)\l}", fillcolor="#deebf7"];
+    HTC [label="{HarmonicsThresholdCalculator|MIN_SYNC_RATIO = 40.0|+ syncRatio(double) : double\l+ isAcceptable(double) : boolean\l}", fillcolor="#deebf7"];
+    PSR [label="{PilotStatusRepository|+ insert / updateStatus\l+ findById / findLockedOnChassis / findAll\l}", fillcolor="#deebf7"];
+    PS [label="{PilotSession|id, pilotName, chassisId\lstress, syncRatio\lstatus : PilotSyncStatus\l|+ transitionTo(PilotSyncStatus)\l}", fillcolor="#deebf7"];
+    PSS [label="{\<\<enumeration\>\>\nPilotSyncStatus|STANDBY\lSYNC_LOCKED\lEJECTED\l}", fillcolor="#deebf7"];
+  }
+
+  subgraph cluster_b { label="Subsystem B - Umbilical Power and Battery Matrix"; style=rounded; color="#548235";
+    PGR [label="{PowerGridRouter|+ charge(String, double) : PowerLine\l+ drain(long) : PowerLine\l+ find(long)\l+ setBayAvailableMegawatts(String, double)\l}", fillcolor="#e2f0d9"];
+    CDR [label="{CapacitorDischargeRule|SAFETY_MARGIN = 1.1|+ evaluate(double, double) : Verdict\l}", fillcolor="#e2f0d9"];
+    PLR [label="{PowerLogRepository|+ insert / update / findById / findAll\l+ bayAvailableMegawatts(String)\l+ setBayAvailableMegawatts(String, double)\l}", fillcolor="#e2f0d9"];
+    PL [label="{PowerLine|id, chassisId, megawatts\lstatus : PowerStatus, note\l|+ transitionTo(PowerStatus)\l}", fillcolor="#e2f0d9"];
+    PWS [label="{\<\<enumeration\>\>\nPowerStatus|DISCONNECTED\lCHARGED\lDRAINED\l}", fillcolor="#e2f0d9"];
+  }
+
+  subgraph cluster_c { label="Subsystem C - GeoFront Linear Catapult"; style=rounded; color="#bf5b17";
+    CP [label="{CatapultPneumatics|+ fire(String, String) : CatapultRun\l+ find(long)\l+ setShaftCondition(String, boolean, boolean)\l+ shaftCondition(String) : ShaftCondition\l}", fillcolor="#fce4d6"];
+    SPC [label="{SiloPathClearanceRule||+ evaluate(ShaftCondition) : Clearance\l}", fillcolor="#fce4d6"];
+    LTR [label="{LaunchTelemetryRepository|+ insert / update / findById / findAll\l+ shaftCondition / setShaftCondition\l}", fillcolor="#fce4d6"];
+    CR [label="{CatapultRun|id, shaftId, chassisId\lstatus : CatapultStatus, note\l|+ transitionTo(CatapultStatus)\l}", fillcolor="#fce4d6"];
+    SC [label="{ShaftCondition\<\<record\>\>|doorOpen, debris}", fillcolor="#fce4d6"];
+    CS [label="{\<\<enumeration\>\>\nCatapultStatus|RESTING\lPRESSURIZED\lLAUNCHED\l}", fillcolor="#fce4d6"];
+  }
+
+  Store [label="{Db (shared helper)|+ open(Path, String) : Connection}", fillcolor="#eeeeee"];
+
+  Client -> Launch [label="uses"];
+  Client -> Control [label="uses"];
+  Launch -> EPL; Launch -> PGR; Launch -> CP; Launch -> OrderRepo; Launch -> Comp; Launch -> Asm;
+  Control -> EPL; Control -> PGR; Control -> CP; Control -> OrderRepo; Control -> Comp; Control -> Asm;
+  Comp -> EPL; Comp -> PGR; Comp -> OrderRepo;
+  Asm -> EPL; Asm -> PGR; Asm -> CP; Asm -> View [style=dashed, label="creates"];
+  OrderRepo -> Order [label="persists"];
+  Order -> Chain;
+
+  EPL -> HTC; EPL -> PSR; PSR -> PS [label="persists"]; PS -> PSS;
+  PGR -> CDR; PGR -> PLR; PLR -> PL [label="persists"]; PL -> PWS;
+  CP -> SPC; CP -> LTR; LTR -> CR [label="persists"]; LTR -> SC; CR -> CS; SPC -> SC [style=dashed];
+
+  PSR -> Store [style=dotted]; PLR -> Store [style=dotted]; LTR -> Store [style=dotted]; OrderRepo -> Store [style=dotted];
+}
